@@ -1,0 +1,1 @@
+The supergrep utility is a Linux command line tool to grep in the plain text parts of as many fileformats as possible
