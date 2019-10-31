@@ -1,5 +1,6 @@
 """Main supergrep script"""
 
+from multiprocessing import Process, Queue, cpu_count, Pipe
 import click
 
 
@@ -35,8 +36,44 @@ def search(pattern, paths, all_files, recursive):
     print("all_files", all_files)
     print("recursive", recursive, end="\n\n")
 
+    job_queue = Queue()
+    worker_count = max(1, cpu_count() - 1)
+    workers = [SearchWorker(job_queue) for _ in range(worker_count)]
+    for worker in workers:
+        worker.start()
+
+    pipes = []
     for path in paths:
-        print(path)
+        parent_conn, child_conn = Pipe()
+        pipes.append(parent_conn)
+        job_queue.put((path, child_conn))
+
+    for _ in range(worker_count):
+        job_queue.put((None, None))
+
+    for pipe in pipes:
+        return_value = pipe.recv()
+        print("Parent got", return_value)
+
+    for worker in workers:
+        worker.join()
+
+
+class SearchWorker(Process):
+    """A work to search files in a separate process"""
+
+    def __init__(self, job_queue):
+        self.job_queue = job_queue
+        super().__init__()
+
+    def run(self):
+        while True:
+            job, pipe = self.job_queue.get()
+            print(self.name, "got", job)
+            if job is None:
+                break
+            pipe.send(job)
+        print(self.name, "Bye!")
 
 
 if __name__ == "__main__":
