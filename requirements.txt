@@ -1,1 +1,4 @@
 click
+filemagic
+attr
+colorama
