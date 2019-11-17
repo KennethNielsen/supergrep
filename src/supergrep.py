@@ -119,6 +119,18 @@ class SearchWorker(Process):
             return SearchResults(results, self.search_term, rtype="text")
         return None
 
+    def search_pdf(self, filetype, filepath):
+        """Return search result for a text file"""
+        # The implementation could use PyPDF2 along the lines of:
+        # import PyPDF2
+        # pdfFileObj = open('mypdf.pdf', 'rb')
+        # pdfReader = PyPDF2.PdfFileReader(pdfFileObj)
+
+        # for pagenumber in range(pdfReader.numPages):
+        #     pageObj = pdfReader.getPage(pagenumber)
+        #     print(pageObj.extractText())
+
+
 
 @attr.s(auto_attribs=True)
 class SearchResult:
