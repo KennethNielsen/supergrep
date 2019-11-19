@@ -130,6 +130,7 @@ class SearchWorker(Process):
         #     pageObj = pdfReader.getPage(pagenumber)
         #     print(pageObj.extractText())
 
+        # Approach above is horribly slow, pdftotext tool is fast.
 
 
 @attr.s(auto_attribs=True)
