@@ -2,6 +2,7 @@
 
 import codecs
 import logging as LOG
+from subprocess import run, PIPE
 from typing import Optional, List
 from multiprocessing import Process, Queue, cpu_count, Pipe
 
@@ -96,11 +97,12 @@ class SearchWorker(Process):
     def search(self, filepath):
         with magic.Magic(flags=magic.MAGIC_MIME_TYPE) as m:
             filetype = m.id_filename(filepath)
+        LOG.debug("Search: '%s' filetype: %s", filepath, filetype)
 
         if filetype.startswith("text/"):
             return self.search_txt(filetype, filepath)
-
-        LOG.info("%s, %s  ###  %s", type(filetype), filetype, filepath)
+        elif filetype == "application/pdf":
+            return self.search_pdf(filetype, filepath)
 
     def search_txt(self, filetype, filepath):
         """Return search result for a text file"""
@@ -121,16 +123,24 @@ class SearchWorker(Process):
 
     def search_pdf(self, filetype, filepath):
         """Return search result for a text file"""
-        # The implementation could use PyPDF2 along the lines of:
-        # import PyPDF2
-        # pdfFileObj = open('mypdf.pdf', 'rb')
-        # pdfReader = PyPDF2.PdfFileReader(pdfFileObj)
+        completed_process = run(["pdftotext", filepath, "-"], stdout=PIPE)
+        if completed_process.returncode != 0:
+            raise RuntimeError("Something went wrong with pdf parsing")
+        pages = completed_process.stdout.decode("utf-8").split("\x0c")
 
-        # for pagenumber in range(pdfReader.numPages):
-        #     pageObj = pdfReader.getPage(pagenumber)
-        #     print(pageObj.extractText())
+        results = []
+        for page_num, page in enumerate(pages, start=1):
+            for line in page.split("\n"):
+                if self.search_term in line:
+                    results.append(
+                        SearchResult(filepath, line.strip(), page_no=page_num)
+                    )
 
-        # Approach above is horribly slow, pdftotext tool is fast.
+        if results:
+            return SearchResults(results, self.search_term, rtype="pdf")
+
+
+### Data classes
 
 
 @attr.s(auto_attribs=True)
@@ -139,7 +149,8 @@ class SearchResult:
 
     filepath: str
     rtext: str
-    line_no: Optional[int]
+    line_no: Optional[int] = None
+    page_no: Optional[int] = None
 
 
 @attr.s(auto_attribs=True)
@@ -159,7 +170,17 @@ class SearchResults:
                 self.search_term, f"{Fore.RED}{self.search_term}{Fore.WHITE}"
             )
             print(
-                f"{Fore.MAGENTA}{result.filepath}, {Fore.GREEN}{result.line_no}: "
+                f"{Fore.MAGENTA}{result.filepath}, {Fore.GREEN}L{result.line_no}: "
+                f"{Fore.WHITE}{Style.BRIGHT}{text}{Style.NORMAL}"
+            )
+
+    def print_pdf_pretty(self):
+        for result in self.results:
+            text = result.rtext.rstrip().replace(
+                self.search_term, f"{Fore.RED}{self.search_term}{Fore.WHITE}"
+            )
+            print(
+                f"{Fore.MAGENTA}{result.filepath}, {Fore.GREEN}P{result.page_no}: "
                 f"{Fore.WHITE}{Style.BRIGHT}{text}{Style.NORMAL}"
             )
 
