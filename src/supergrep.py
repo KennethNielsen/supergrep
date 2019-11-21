@@ -1,4 +1,9 @@
-"""Main supergrep script"""
+"""Main supergrep script
+
+This module contain the main supergrep code, to recursive over files,
+do the text matching and output results.
+
+"""
 
 import codecs
 import logging as LOG
