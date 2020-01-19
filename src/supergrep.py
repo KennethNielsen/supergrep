@@ -5,8 +5,10 @@ do the text matching and output results.
 
 """
 
+import zipfile
 import codecs
 import logging as LOG
+import xml.etree.ElementTree as ET
 from subprocess import run, PIPE, check_call, CalledProcessError, DEVNULL
 from typing import Optional, List
 from multiprocessing import Process, Queue, cpu_count, Pipe
@@ -23,7 +25,7 @@ colorama.init()
 
 
 @click.command(
-    help="supergrep will grep in plain text parts of plain text files and ..."
+    help="supergrep will grep in plain text parts of plain text files and OpenDocument Text format (odt) files"
 )
 @click.argument("pattern")
 @click.argument("paths", nargs=-1)
@@ -85,6 +87,16 @@ def search(pattern, paths, all_files, recursive):
         worker.join()
 
 
+def qn(namespace):
+    """Return a odt qualified name"""
+    nsmap = {
+        "text": "urn:oasis:names:tc:opendocument:xmlns:text:1.0",
+        "office": "urn:oasis:names:tc:opendocument:xmlns:office:1.0",
+    }
+    spl = namespace.split(":")
+    return "{{{}}}{}".format(nsmap[spl[0]], spl[1])
+
+
 class SearchWorker(Process):
     """A work to search files in a separate process"""
 
@@ -114,6 +126,8 @@ class SearchWorker(Process):
             return self.search_txt(filetype, filepath)
         elif filetype == "application/pdf":
             return self.search_pdf(filetype, filepath)
+        elif filetype == "application/vnd.oasis.opendocument.text":
+            return self.search_odt(filetype, filepath)
 
     def search_txt(self, filetype, filepath):
         """Return search result for a text file"""
@@ -150,6 +164,42 @@ class SearchWorker(Process):
         if results:
             return SearchResults(results, self.search_term, rtype="pdf")
 
+    def search_odt(self, filetype, filepath):
+        """Return search results for an odt file"""
+        # Most of the odt parsing including the qn function is
+        # shamelessly stolen from
+        # https://github.com/deanmalmgren/textract/blob/master/textract/parsers/odt_parser.py
+        with open(filepath, "rb") as stream:
+            zip_stream = zipfile.ZipFile(stream)
+            content = ET.fromstring(zip_stream.read("content.xml"))
+        results = self.search_odt_element(filepath, content, [], [])
+        if results:
+            return SearchResults(results, self.search_term, rtype="odt")
+
+    def search_odt_element(self, filepath, element, sections, results):
+        """Search an element, if it has sub elements iterate"""
+        # Look for headers
+        if element.tag == qn("text:h"):
+            header_text = element.text
+            if header_text is None:
+                header_text = ""
+            sections.append(header_text)
+
+            if self.search_term in header_text:
+                results.append(SearchResult(filepath, sections=tuple(sections)))
+        # Else look for text
+        else:
+            etext = element.text
+            if etext is not None and self.search_term in etext:
+                results.append(
+                    SearchResult(filepath, rtext=etext, sections=tuple(sections))
+                )
+
+        for child in element:
+            results = self.search_odt_element(filepath, child, sections, results)
+
+        return results
+
 
 ### Data classes
 
@@ -159,9 +209,10 @@ class SearchResult:
     """Class that represents a search result"""
 
     filepath: str
-    rtext: str
+    rtext: Optional[str] = None
     line_no: Optional[int] = None
     page_no: Optional[int] = None
+    sections: Optional[List[str]] = None
 
 
 @attr.s(auto_attribs=True)
@@ -194,6 +245,28 @@ class SearchResults:
                 f"{Fore.MAGENTA}{result.filepath}, {Fore.GREEN}P{result.page_no}: "
                 f"{Fore.WHITE}{Style.BRIGHT}{text}{Style.NORMAL}"
             )
+
+    def print_odt_pretty(self):
+        for result in self.results:
+            sectionpath = "->".join('"' + section + '"' for section in result.sections)
+            if not sectionpath:
+                sectionpath = "-"
+            if result.rtext:
+                text = result.rtext.rstrip().replace(
+                    self.search_term, f"{Fore.RED}{self.search_term}{Fore.WHITE}"
+                )
+                print(
+                    f"{Fore.MAGENTA}{result.filepath}, {Fore.GREEN}{sectionpath}: "
+                    f"{Fore.WHITE}{Style.BRIGHT}{text}{Style.NORMAL}"
+                )
+            else:
+                modified_sectionpath = sectionpath.replace(
+                    self.search_term, f"{Fore.RED}{self.search_term}{Fore.GREEN}"
+                )
+                print(
+                    f"{Fore.MAGENTA}{result.filepath}, {Fore.GREEN}{sectionpath}"
+                    f"{Style.NORMAL}"
+                )
 
 
 if __name__ == "__main__":
