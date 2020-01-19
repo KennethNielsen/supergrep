@@ -7,7 +7,7 @@ do the text matching and output results.
 
 import codecs
 import logging as LOG
-from subprocess import run, PIPE
+from subprocess import run, PIPE, check_call, CalledProcessError, DEVNULL
 from typing import Optional, List
 from multiprocessing import Process, Queue, cpu_count, Pipe
 
@@ -53,6 +53,12 @@ def search(pattern, paths, all_files, recursive):
     LOG.info("Argument PATHS    : %s", paths)
     LOG.info("Argument all_files: %s", all_files)
     LOG.info("Argument recursive: %s", recursive)
+
+    # Check pdftotext dependency
+    try:
+        check_call(("which", "pdftotext"), stdout=DEVNULL, stderr=DEVNULL)
+    except CalledProcessError:
+        raise click.ClickException("supergrep needs the pdftotext command to work")
 
     job_queue = Queue()
     worker_count = max(1, cpu_count() - 1)
